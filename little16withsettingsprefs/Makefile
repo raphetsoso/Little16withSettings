@@ -8,7 +8,8 @@ BUNDLE_NAME = Little16WithSettingsPrefs
 
 Little16WithSettingsPrefs_FILES = L16RootListController.m
 Little16WithSettingsPrefs_FRAMEWORKS = UIKit
-Little16WithSettingsPrefs_PRIVATE_FRAMEWORKS = Preferences
+# Preferences is a private framework missing from the CI SDKs: resolve its symbols at runtime
+Little16WithSettingsPrefs_LDFLAGS = -undefined dynamic_lookup
 Little16WithSettingsPrefs_INSTALL_PATH = /Library/PreferenceBundles
 Little16WithSettingsPrefs_CFLAGS = -fobjc-arc
 
