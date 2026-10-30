@@ -51,3 +51,4 @@ jobs:
           name: Little16WithSettings-deb
           path: packages/*.deb
           if-no-files-found: error
+
