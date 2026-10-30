@@ -14,6 +14,11 @@ Enable iPhone X Gestures on iOS 15 - 26?
 
 Most toggles apply live; dock / status bar / gesture changes may need a respring.
 
+## Classic (edge to edge) dock behaviour
+* Nothing extra enabled: dock icons use exactly the same spacing as the home screen icons (measured at runtime).
+* Recent apps: icons and bar height shrink with the number of items; the bar stays glued to the bottom.
+* App Library: bar and icons keep their size, only the spacing tightens a bit; the library icon is the same size as the other icons.
+
 ## Build
 Requires [Theos](https://theos.dev) with an iOS 15+ SDK.
 

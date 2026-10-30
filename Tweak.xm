@@ -216,35 +216,280 @@ static void L16Flatten(UIView *v, int depth) {
     for (UIView *sub in v.subviews) L16Flatten(sub, depth + 1);
 }
 
-%hook SBFloatingDockPlatterView
-- (void)layoutSubviews {
-    %orig;
-    if (L16ClassicDock()) L16Flatten(self, 0);
-}
-%end
+// ---------------------------------------------------------------------------
+// Classic dock layout engine
+//
+// Rules:
+//  * Nothing extra enabled: the dock icons use EXACTLY the same column pitch as
+//    the icons of the home screen (measured at runtime), centred on the screen.
+//  * Recent apps: the icons (and the bar height) shrink with the number of
+//    items. The bar stays glued to the bottom edge of the screen.
+//  * App Library: never shrinks the bar or the icons. The icons are simply
+//    spaced a bit closer, and the library icon has the same size as the others.
+// ---------------------------------------------------------------------------
 
-// Height of the real iPhone (Home button) dock background.
-#define L16_CLASSIC_DOCK_HEIGHT 96.0
+#define L16_ICON_SIZE     60.0   // visual size of an icon at scale 1
+#define L16_DOCK_PAD      18.0   // top / bottom padding -> 18 + 60 + 18 = 96
+#define L16_SIDE_MARGIN    8.0   // minimum margin left / right of the icons
+#define L16_MIN_GAP        4.0   // minimum gap between two icons
+#define L16_DIVIDER_SLOT   0.4   // extra room (in pitches) around the divider
 
 // Distance between the bottom of the floating dock view and the bottom of the
 // screen when the dock is shown. Cached so the hidden state (app switcher)
 // does not overwrite it.
 static CGFloat sL16DockBottomExtra = 0;
 
-// Union (in `root` coordinates) of all visible icon views below `v`.
-static CGRect L16IconsUnion(UIView *v, UIView *root, int depth) {
-    CGRect u = CGRectNull;
-    if (!v || depth > 8 || v.hidden || v.alpha < 0.01) return u;
-    NSString *n = NSStringFromClass([v class]);
-    if ([n containsString:@"IconView"] && ![n containsString:@"ListView"]) {
-        return [v convertRect:v.bounds toView:root];
-    }
-    for (UIView *sub in v.subviews) {
-        CGRect r = L16IconsUnion(sub, root, depth + 1);
-        if (!CGRectIsNull(r)) u = CGRectIsNull(u) ? r : CGRectUnion(u, r);
-    }
-    return u;
+// Column pitch of the home screen icons, measured from the real home screen.
+static CGFloat sL16HomePitch = 0;
+static BOOL    sL16Applying  = NO;
+
+static CGFloat L16HomePitch(CGFloat screenWidth) {
+    if (sL16HomePitch > 0) return sL16HomePitch;
+    return round(screenWidth * 0.232); // fallback (87pt on a 375pt wide screen)
 }
+
+static UIView *L16EnclosingDock(UIView *v) {
+    Class dockCls = NSClassFromString(@"SBFloatingDockView");
+    if (!dockCls) return nil;
+    UIView *p = v.superview;
+    for (int i = 0; p && i < 10; i++, p = p.superview) {
+        if ([p isKindOfClass:dockCls]) return p;
+    }
+    return nil;
+}
+
+// Measure the distance between two neighbouring icons of the first row of the
+// home screen page (in the list view's own coordinates, so it is not affected
+// by any zoom animation on the parents).
+static void L16MeasureHomePitch(UIView *list) {
+    if (!CGAffineTransformIsIdentity(list.transform)) return;
+    NSMutableArray<UIView *> *icons = [NSMutableArray array];
+    CGFloat minY = CGFLOAT_MAX;
+    for (UIView *s in list.subviews) {
+        NSString *n = NSStringFromClass([s class]);
+        if (s.hidden || ![n containsString:@"IconView"] || [n containsString:@"ListView"]) continue;
+        [icons addObject:s];
+        minY = MIN(minY, s.center.y);
+    }
+    NSMutableArray<UIView *> *row = [NSMutableArray array];
+    for (UIView *s in icons) {
+        if (fabs(s.center.y - minY) < 4.0) [row addObject:s];
+    }
+    if (row.count < 3) return;
+    [row sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+        return a.center.x < b.center.x ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    CGFloat step = row[1].center.x - row[0].center.x;
+    if (step < 50.0 || step > 140.0) return;
+    for (NSUInteger i = 1; i < row.count; i++) {
+        if (fabs((row[i].center.x - row[i - 1].center.x) - step) > 1.0) return; // widget / gap in the row
+        if (fabs(row[i].bounds.size.width - row[0].bounds.size.width) > 1.5) return;
+    }
+    sL16HomePitch = step;
+}
+
+static CGFloat L16XIn(UIView *v, UIView *dock) {
+    return [v.superview convertPoint:v.center toView:dock].x;
+}
+
+// Visible icon views (dock icons, recents, app library) anywhere below `v`.
+static void L16CollectItems(UIView *v, NSMutableArray<UIView *> *out, int depth) {
+    if (depth > 8) return;
+    for (UIView *sub in v.subviews) {
+        if (sub.hidden || sub.alpha < 0.01) continue;
+        NSString *n = NSStringFromClass([sub class]);
+        BOOL listView = [n containsString:@"ListView"];
+        BOOL iconView = [n containsString:@"IconView"] && !listView;
+        BOOL libView  = [n containsString:@"Library"] && !listView &&
+                        sub.bounds.size.width <= 100 && sub.bounds.size.height <= 100;
+        if ((iconView || libView) && sub.bounds.size.width > 10) {
+            [out addObject:sub];
+        } else {
+            L16CollectItems(sub, out, depth + 1);
+        }
+    }
+}
+
+static NSString *L16ListLocation(UIView *item, UIView *dock) {
+    for (UIView *p = item.superview; p && p != dock; p = p.superview) {
+        if ([p respondsToSelector:@selector(iconLocation)]) {
+            return [(SBIconListView *)p iconLocation];
+        }
+    }
+    return nil;
+}
+
+static UIView *L16FindByName(UIView *v, NSString *part, int depth) {
+    if (depth > 4) return nil;
+    for (UIView *sub in v.subviews) {
+        NSString *n = NSStringFromClass([sub class]);
+        if ([n containsString:part]) return sub;
+        if ([n containsString:@"IconView"]) continue;
+        UIView *r = L16FindByName(sub, part, depth + 1);
+        if (r) return r;
+    }
+    return nil;
+}
+
+static void L16ApplyClassicDockInner(UIView *dock) {
+    UIView *platter = nil;
+    for (UIView *sub in dock.subviews) {
+        if ([NSStringFromClass([sub class]) containsString:@"Platter"]) { platter = sub; break; }
+    }
+    if (!platter) {
+        for (UIView *sub in dock.subviews) {
+            if ([NSStringFromClass([sub class]) containsString:@"Background"]) { platter = sub; break; }
+        }
+    }
+    if (!platter) return;
+
+    dock.clipsToBounds = NO;
+
+    UIScreen *scr = dock.window.screen ?: [UIScreen mainScreen];
+    CGRect screen = [scr.coordinateSpace convertRect:scr.bounds toCoordinateSpace:dock];
+
+    // ---- 1. collect and group the items -----------------------------------
+    NSMutableArray<UIView *> *items = [NSMutableArray array];
+    L16CollectItems(dock, items, 0);
+
+    UIView *divider = L16FindByName(dock, @"Divider", 0);
+    BOOL dividerVisible = divider && !divider.hidden && divider.alpha >= 0.01;
+    CGFloat dividerX = dividerVisible ? L16XIn(divider, dock) : CGFLOAT_MAX;
+
+    NSMutableArray<UIView *> *left  = [NSMutableArray array]; // user icons
+    NSMutableArray<UIView *> *right = [NSMutableArray array]; // recents (+ app library)
+    for (UIView *it in items) {
+        NSString *loc = L16ListLocation(it, dock);
+        BOOL isUser;
+        if (loc) {
+            isUser = [loc containsString:@"Dock"] && ![loc containsString:@"Suggest"] &&
+                     ![loc containsString:@"Recent"] && ![loc containsString:@"Library"];
+        } else {
+            isUser = L16XIn(it, dock) < dividerX;
+        }
+        [(isUser ? left : right) addObject:it];
+    }
+    NSComparator byX = ^NSComparisonResult(UIView *a, UIView *b) {
+        CGFloat xa = L16XIn(a, dock), xb = L16XIn(b, dock);
+        return xa < xb ? NSOrderedAscending : (xa > xb ? NSOrderedDescending : NSOrderedSame);
+    };
+    [left sortUsingComparator:byX];
+    [right sortUsingComparator:byX];
+
+    // The App Library icon is always the right-most item of the dock.
+    if (pAppLibrary && right.count == 0 && left.count > 1) {
+        UIView *last = left.lastObject;
+        [left removeLastObject];
+        [right addObject:last];
+    }
+    BOOL hasLibrary = pAppLibrary && right.count > 0;
+    NSUInteger nLeft    = left.count;
+    NSUInteger nRecents = right.count - (hasLibrary ? 1 : 0);
+    NSUInteger nAll     = nLeft + right.count;
+
+    // ---- 2. scale / pitch --------------------------------------------------
+    CGFloat avail = screen.size.width - 2 * L16_SIDE_MARGIN;
+    CGFloat P     = L16HomePitch(screen.size.width);
+
+    // Scale is driven by user icons + recents only (NOT by the app library).
+    NSUInteger nBase = MAX((NSUInteger)1, nLeft + nRecents);
+    CGFloat baseGap  = (nLeft > 0 && nRecents > 0) ? L16_DIVIDER_SLOT : 0;
+    CGFloat naturalW = ((CGFloat)(nBase - 1) + baseGap) * P + L16_ICON_SIZE;
+    CGFloat s = MIN(1.0, avail / naturalW);
+    CGFloat p = s * P;
+
+    // The app library (if any) only tightens the spacing, icons keep their size.
+    CGFloat gap   = (nLeft > 0 && right.count > 0) ? L16_DIVIDER_SLOT : 0;
+    CGFloat slots = (nAll > 0 ? (CGFloat)(nAll - 1) : 0) + gap;
+    if (slots > 0) {
+        if (slots * p + L16_ICON_SIZE * s > avail) {
+            p = (avail - L16_ICON_SIZE * s) / slots;
+        }
+        CGFloat minP = (L16_ICON_SIZE + L16_MIN_GAP) * s;
+        if (p < minP) { // really too many items: last resort, shrink the icons
+            s = avail / (slots * (L16_ICON_SIZE + L16_MIN_GAP) + L16_ICON_SIZE);
+            p = (L16_ICON_SIZE + L16_MIN_GAP) * s;
+        }
+    }
+    s = MAX(0.4, MIN(1.0, s));
+
+    // ---- 3. the bar: full width, stuck to the bottom, height follows the scale
+    CGFloat H = 2 * L16_DOCK_PAD + L16_ICON_SIZE * s;
+
+    // When the dock is shown its bottom sits a few points above the screen
+    // edge (floating margin). Remember that gap and stick the platter to the
+    // real bottom edge. When the dock is hidden (app switcher) the gap is
+    // negative, so keep the cached value.
+    CGFloat extra = CGRectGetMaxY(screen) - CGRectGetMaxY(dock.bounds);
+    if (extra >= 0 && extra < 80) sL16DockBottomExtra = extra;
+
+    CGRect f = platter.frame;
+    f.size.width  = screen.size.width;
+    f.size.height = H;
+    f.origin.x    = screen.origin.x;
+    f.origin.y    = CGRectGetMaxY(dock.bounds) + sL16DockBottomExtra - H;
+    if (!CGRectEqualToRect(platter.frame, f)) platter.frame = f;
+    L16Flatten(platter, 0);
+
+    if (nAll == 0) return;
+
+    // ---- 4. place the icons ------------------------------------------------
+    CGFloat totalW = slots * p + L16_ICON_SIZE * s;
+    CGFloat startX = screen.origin.x + (screen.size.width - totalW) / 2.0 + L16_ICON_SIZE * s / 2.0;
+    CGFloat y      = CGRectGetMidY(f);
+
+    UIView *ref = left.firstObject ?: right.firstObject;
+    CGFloat refW = MAX(1.0, ref.bounds.size.width);
+
+    void (^place)(UIView *, CGFloat) = ^(UIView *it, CGFloat slot) {
+        CGPoint c = [dock convertPoint:CGPointMake(startX + p * slot, y) toView:it.superview];
+        CGFloat k = s * refW / MAX(1.0, it.bounds.size.width); // same size for every item
+        it.center = c;
+        it.transform = fabs(k - 1.0) < 0.001 ? CGAffineTransformIdentity
+                                             : CGAffineTransformMakeScale(k, k);
+    };
+    for (NSUInteger i = 0; i < left.count; i++)  place(left[i], (CGFloat)i);
+    for (NSUInteger j = 0; j < right.count; j++) place(right[j], (CGFloat)nLeft + gap + (CGFloat)j);
+
+    if (dividerVisible && nLeft > 0 && right.count > 0) {
+        CGFloat dslot = ((CGFloat)nLeft - 1.0) + (1.0 + gap) / 2.0;
+        divider.center = [dock convertPoint:CGPointMake(startX + p * dslot, y) toView:divider.superview];
+    }
+}
+
+static void L16ApplyClassicDock(UIView *dock) {
+    if (sL16Applying || !dock.window) return;
+    sL16Applying = YES;
+    @try {
+        L16ApplyClassicDockInner(dock);
+    } @finally {
+        sL16Applying = NO;
+    }
+}
+
+// Called every time an icon list lays out: measures the home screen and keeps
+// the dock icons in place when the list re-positions them.
+static void L16ListDidLayout(SBIconListView *list) {
+    if (!L16ClassicDock()) return;
+    NSString *loc = list.iconLocation;
+    if (!loc) return;
+    if ([loc isEqualToString:@"SBIconLocationRoot"]) {
+        L16MeasureHomePitch(list);
+    } else if ([loc containsString:@"Dock"]) {
+        UIView *dock = L16EnclosingDock(list);
+        if (dock) L16ApplyClassicDock(dock);
+    }
+}
+
+%hook SBFloatingDockPlatterView
+- (void)layoutSubviews {
+    %orig;
+    if (!L16ClassicDock()) return;
+    L16Flatten(self, 0);
+    UIView *dock = L16EnclosingDock(self);
+    if (dock) L16ApplyClassicDock(dock);
+}
+%end
 
 %hook SBFloatingDockView
 - (void)setFrame:(CGRect)f { %orig; if (L16ClassicDock()) [self setNeedsLayout]; }
@@ -253,59 +498,7 @@ static CGRect L16IconsUnion(UIView *v, UIView *root, int depth) {
 
 - (void)layoutSubviews {
     %orig;
-    if (!L16ClassicDock() || !self.window) return;
-
-    UIView *platter = nil;
-    for (UIView *sub in self.subviews) {
-        if ([NSStringFromClass([sub class]) containsString:@"Platter"]) { platter = sub; break; }
-    }
-    if (!platter) {
-        for (UIView *sub in self.subviews) {
-            if ([NSStringFromClass([sub class]) containsString:@"Background"]) { platter = sub; break; }
-        }
-    }
-    if (!platter) return;
-
-    self.clipsToBounds = NO;
-
-    UIScreen *scr = self.window.screen ?: [UIScreen mainScreen];
-    CGRect screen = [scr.coordinateSpace convertRect:scr.bounds toCoordinateSpace:self];
-
-    // When the dock is shown its bottom sits a few points above the screen
-    // edge (floating margin). Remember that gap and stick the platter to the
-    // real bottom edge. When the dock is hidden (app switcher) the gap is
-    // negative, so keep the cached value: the platter keeps its fixed height
-    // and slides down with the dock view instead of sticking out.
-    CGFloat extra = CGRectGetMaxY(screen) - CGRectGetMaxY(self.bounds);
-    if (extra >= 0 && extra < 80) sL16DockBottomExtra = extra;
-
-    CGRect f = platter.frame;
-    f.size.width  = screen.size.width;
-    f.size.height = L16_CLASSIC_DOCK_HEIGHT;
-    f.origin.x    = screen.origin.x;
-    f.origin.y    = CGRectGetMaxY(self.bounds) + sL16DockBottomExtra - L16_CLASSIC_DOCK_HEIGHT;
-    platter.frame = f;
-    L16Flatten(platter, 0);
-
-    // Center the icons in the dock (horizontally on the screen, vertically in the platter).
-    CGRect u = L16IconsUnion(self, self, 0);
-    if (CGRectIsNull(u)) return;
-    CGFloat dx = CGRectGetMidX(screen) - CGRectGetMidX(u);
-    CGFloat dy = CGRectGetMidY(f) - CGRectGetMidY(u);
-    if (fabs(dx) < 0.5 && fabs(dy) < 0.5) return;
-
-    NSMutableArray<UIView *> *targets = [NSMutableArray array];
-    for (UIView *sub in self.subviews) {
-        if (sub != platter && !CGRectIsNull(L16IconsUnion(sub, sub, 0))) [targets addObject:sub];
-    }
-    if (targets.count == 0) {
-        for (UIView *sub in platter.subviews) {
-            if (!CGRectIsNull(L16IconsUnion(sub, sub, 0))) [targets addObject:sub];
-        }
-    }
-    for (UIView *sub in targets) {
-        sub.center = CGPointMake(sub.center.x + dx, sub.center.y + dy);
-    }
+    if (L16ClassicDock()) L16ApplyClassicDock(self);
 }
 %end
 
@@ -361,6 +554,14 @@ static CGRect L16IconsUnion(UIView *v, UIView *root, int depth) {
         return (unsigned long long)pDockIcons;
     }
     return %orig;
+}
+- (void)layoutSubviews {
+    %orig;
+    L16ListDidLayout(self);
+}
+- (void)layoutIconsNow {
+    %orig;
+    L16ListDidLayout(self);
 }
 %end
 
