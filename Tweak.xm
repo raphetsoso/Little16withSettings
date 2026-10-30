@@ -202,6 +202,12 @@ static BOOL L16ClassicDock(void) {
     return L16_ON(pFloatingDock) && pDockStyle == 1;
 }
 
+// Edge to edge dock + App Library: at most 2 recent apps (not enough room otherwise).
+static NSInteger L16RecentsCount(void) {
+    if (L16ClassicDock() && pAppLibrary) return MIN((NSInteger)2, pRecentsCount);
+    return pRecentsCount;
+}
+
 static BOOL L16IsIconView(UIView *v) {
     NSString *n = NSStringFromClass([v class]);
     return [n containsString:@"Icon"] || [n containsString:@"Label"];
@@ -230,9 +236,9 @@ static void L16Flatten(UIView *v, int depth) {
 
 #define L16_ICON_SIZE     60.0   // visual size of an icon at scale 1
 #define L16_DOCK_PAD      18.0   // top / bottom padding -> 18 + 60 + 18 = 96
-#define L16_SIDE_MARGIN    8.0   // minimum margin left / right of the icons
-#define L16_MIN_GAP        4.0   // minimum gap between two icons
-#define L16_DIVIDER_SLOT   0.4   // extra room (in pitches) around the divider
+#define L16_LIB_MARGIN    20.0   // min margin left / right when the App Library is on
+#define L16_MIN_GAP       10.0   // min gap between two icons (never stuck together)
+#define L16_DIVIDER_EXTRA 12.0   // extra room around the divider (recents / library)
 
 // Distance between the bottom of the floating dock view and the bottom of the
 // screen when the dock is shown. Cached so the hidden state (app switcher)
@@ -377,54 +383,66 @@ static void L16ApplyClassicDockInner(UIView *dock) {
     [right sortUsingComparator:byX];
 
     // The App Library icon is always the right-most item of the dock.
-    if (pAppLibrary && right.count == 0 && left.count > 1) {
+    if (pAppLibrary && left.count > 1) {
         UIView *last = left.lastObject;
-        [left removeLastObject];
-        [right addObject:last];
+        UIView *rl   = right.lastObject;
+        if (!rl || L16XIn(last, dock) > L16XIn(rl, dock)) {
+            [left removeLastObject];
+            [right addObject:last];
+        }
     }
     BOOL hasLibrary = pAppLibrary && right.count > 0;
     NSUInteger nLeft    = left.count;
     NSUInteger nRecents = right.count - (hasLibrary ? 1 : 0);
     NSUInteger nAll     = nLeft + right.count;
 
-    // ---- 2. scale / pitch --------------------------------------------------
-    CGFloat avail = screen.size.width - 2 * L16_SIDE_MARGIN;
-    CGFloat P     = L16HomePitch(screen.size.width);
+    // ---- 2. scale / spacing ------------------------------------------------
+    CGFloat W          = screen.size.width;
+    CGFloat P          = L16HomePitch(W);
+    CGFloat naturalGap = MAX(0.0, P - L16_ICON_SIZE);
+    // Side margin of the home screen icons (27pt on a 375pt screen).
+    CGFloat homeMargin = MAX(12.0, (W - (3.0 * P + L16_ICON_SIZE)) / 2.0);
+    CGFloat margin     = hasLibrary ? MIN(homeMargin, L16_LIB_MARGIN) : homeMargin;
+    CGFloat avail      = W - 2.0 * margin;
+    CGFloat nF         = (CGFloat)nAll;
+    CGFloat dividerExtra = (nLeft > 0 && right.count > 0) ? L16_DIVIDER_EXTRA : 0;
 
     // Scale is driven by user icons + recents only (NOT by the app library).
     NSUInteger nBase = MAX((NSUInteger)1, nLeft + nRecents);
-    CGFloat baseGap  = (nLeft > 0 && nRecents > 0) ? L16_DIVIDER_SLOT : 0;
-    CGFloat naturalW = ((CGFloat)(nBase - 1) + baseGap) * P + L16_ICON_SIZE;
-    CGFloat s = MIN(1.0, avail / naturalW);
-    CGFloat p = s * P;
+    CGFloat baseExtra = (nLeft > 0 && nRecents > 0) ? L16_DIVIDER_EXTRA : 0;
+    CGFloat naturalW  = ((CGFloat)nBase - 1.0) * P + L16_ICON_SIZE + baseExtra;
+    CGFloat s = MIN(1.0, (W - 2.0 * homeMargin) / naturalW);
 
-    // The app library (if any) only tightens the spacing, icons keep their size.
-    CGFloat gap   = (nLeft > 0 && right.count > 0) ? L16_DIVIDER_SLOT : 0;
-    CGFloat slots = (nAll > 0 ? (CGFloat)(nAll - 1) : 0) + gap;
-    if (slots > 0) {
-        if (slots * p + L16_ICON_SIZE * s > avail) {
-            p = (avail - L16_ICON_SIZE * s) / slots;
-        }
-        CGFloat minP = (L16_ICON_SIZE + L16_MIN_GAP) * s;
-        if (p < minP) { // really too many items: last resort, shrink the icons
-            s = avail / (slots * (L16_ICON_SIZE + L16_MIN_GAP) + L16_ICON_SIZE);
-            p = (L16_ICON_SIZE + L16_MIN_GAP) * s;
-        }
+    // With the app library the icons keep their size as long as they can keep
+    // a minimum gap between them; only then they shrink (all the same size).
+    if (hasLibrary && nAll > 1) {
+        CGFloat need = nF * L16_ICON_SIZE + (nF - 1.0) * L16_MIN_GAP + dividerExtra;
+        if (need * s > avail) s = avail / need;
     }
     s = MAX(0.4, MIN(1.0, s));
 
+    CGFloat iconW     = L16_ICON_SIZE * s;
+    CGFloat dividerPx = dividerExtra * s;
+    CGFloat gapPx     = naturalGap * s;
+    if (nAll > 1) {
+        CGFloat maxGap = (avail - nF * iconW - dividerPx) / (nF - 1.0);
+        if (gapPx > maxGap) gapPx = maxGap; // tighten the spacing, never the icons
+    } else {
+        gapPx = 0;
+    }
+
     // ---- 3. the bar: full width, stuck to the bottom, height follows the scale
-    CGFloat H = 2 * L16_DOCK_PAD + L16_ICON_SIZE * s;
+    CGFloat H = 2 * L16_DOCK_PAD + iconW;
 
     // When the dock is shown its bottom sits a few points above the screen
     // edge (floating margin). Remember that gap and stick the platter to the
     // real bottom edge. When the dock is hidden (app switcher) the gap is
     // negative, so keep the cached value.
-    CGFloat extra = CGRectGetMaxY(screen) - CGRectGetMaxY(dock.bounds);
-    if (extra >= 0 && extra < 80) sL16DockBottomExtra = extra;
+    CGFloat bottomGap = CGRectGetMaxY(screen) - CGRectGetMaxY(dock.bounds);
+    if (bottomGap >= 0 && bottomGap < 80) sL16DockBottomExtra = bottomGap;
 
     CGRect f = platter.frame;
-    f.size.width  = screen.size.width;
+    f.size.width  = W;
     f.size.height = H;
     f.origin.x    = screen.origin.x;
     f.origin.y    = CGRectGetMaxY(dock.bounds) + sL16DockBottomExtra - H;
@@ -434,26 +452,36 @@ static void L16ApplyClassicDockInner(UIView *dock) {
     if (nAll == 0) return;
 
     // ---- 4. place the icons ------------------------------------------------
-    CGFloat totalW = slots * p + L16_ICON_SIZE * s;
-    CGFloat startX = screen.origin.x + (screen.size.width - totalW) / 2.0 + L16_ICON_SIZE * s / 2.0;
+    // We never touch `center` (the icon list owns it): we only apply a
+    // transform = scale + offset from the natural position the list gave us.
+    // This is idempotent and cannot send icons to the top-left corner.
+    CGFloat step   = iconW + gapPx;
+    CGFloat total  = nF * iconW + (nF - 1.0) * gapPx + dividerPx;
+    CGFloat startX = screen.origin.x + (W - total) / 2.0 + iconW / 2.0;
     CGFloat y      = CGRectGetMidY(f);
 
     UIView *ref = left.firstObject ?: right.firstObject;
     CGFloat refW = MAX(1.0, ref.bounds.size.width);
 
-    void (^place)(UIView *, CGFloat) = ^(UIView *it, CGFloat slot) {
-        CGPoint c = [dock convertPoint:CGPointMake(startX + p * slot, y) toView:it.superview];
-        CGFloat k = s * refW / MAX(1.0, it.bounds.size.width); // same size for every item
-        it.center = c;
-        it.transform = fabs(k - 1.0) < 0.001 ? CGAffineTransformIdentity
-                                             : CGAffineTransformMakeScale(k, k);
-    };
-    for (NSUInteger i = 0; i < left.count; i++)  place(left[i], (CGFloat)i);
-    for (NSUInteger j = 0; j < right.count; j++) place(right[j], (CGFloat)nLeft + gap + (CGFloat)j);
+    CGFloat (^cxLeft)(NSUInteger)  = ^CGFloat(NSUInteger i) { return startX + step * (CGFloat)i; };
+    CGFloat (^cxRight)(NSUInteger) = ^CGFloat(NSUInteger j) { return startX + step * (CGFloat)(nLeft + j) + dividerPx; };
 
-    if (dividerVisible && nLeft > 0 && right.count > 0) {
-        CGFloat dslot = ((CGFloat)nLeft - 1.0) + (1.0 + gap) / 2.0;
-        divider.center = [dock convertPoint:CGPointMake(startX + p * dslot, y) toView:divider.superview];
+    void (^place)(UIView *, CGFloat) = ^(UIView *it, CGFloat cx) {
+        UIView *sup = it.superview;
+        if (!sup) return;
+        CGPoint target = [dock convertPoint:CGPointMake(cx, y) toView:sup];
+        CGPoint nat    = it.center;
+        CGFloat k = s * refW / MAX(1.0, it.bounds.size.width); // same size for every item
+        it.transform = CGAffineTransformMake(k, 0, 0, k, target.x - nat.x, target.y - nat.y);
+    };
+    for (NSUInteger i = 0; i < left.count; i++)  place(left[i],  cxLeft(i));
+    for (NSUInteger j = 0; j < right.count; j++) place(right[j], cxRight(j));
+
+    if (dividerVisible && nLeft > 0 && right.count > 0 && divider.superview) {
+        CGFloat dx = (cxLeft(nLeft - 1) + cxRight(0)) / 2.0;
+        CGPoint target = [dock convertPoint:CGPointMake(dx, y) toView:divider.superview];
+        CGPoint nat    = divider.center;
+        divider.transform = CGAffineTransformMakeTranslation(target.x - nat.x, target.y - nat.y);
     }
 }
 
@@ -573,12 +601,12 @@ static void L16ListDidLayout(SBIconListView *list) {
 
 - (id)initWithMaximumNumberOfSuggestions:(NSUInteger)arg1 iconController:(id)arg2 recentsController:(id)arg3 recentsDataStore:(id)arg4 recentsDefaults:(id)arg5 floatingDockDefaults:(id)arg6 appSuggestionManager:(id)arg7 applicationController:(id)arg8 {
     if (L16_ON(pFloatingDock)) {
-        return %orig((NSUInteger)pRecentsCount,arg2,arg3,arg4,arg5,arg6,arg7,arg8);
+        return %orig((NSUInteger)L16RecentsCount(),arg2,arg3,arg4,arg5,arg6,arg7,arg8);
     }
     return %orig;
 }
 -(unsigned long long)maxSuggestions {
-    if (L16_ON(pFloatingDock)) return (unsigned long long)pRecentsCount;
+    if (L16_ON(pFloatingDock)) return (unsigned long long)L16RecentsCount();
     return %orig;
 }
 %end
@@ -586,7 +614,7 @@ static void L16ListDidLayout(SBIconListView *list) {
 %hook SBFloatingDockSuggestionsViewController
 -(id)initWithNumberOfRecents:(unsigned long long)arg1 iconController:(id)arg2 applicationController:(id)arg3 layoutStateTransitionCoordinator:(id)arg4 suggestionsModel:(id)arg5 iconViewProvider:(id)arg6 {
     if (L16_ON(pFloatingDock)) {
-        return %orig((unsigned long long)pRecentsCount,arg2,arg3,arg4,arg5,arg6);
+        return %orig((unsigned long long)L16RecentsCount(),arg2,arg3,arg4,arg5,arg6);
     }
     return %orig;
 }
