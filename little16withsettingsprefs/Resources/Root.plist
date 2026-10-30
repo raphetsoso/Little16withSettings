@@ -80,7 +80,7 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>footerText</key>
-			<string>Floating dock opens by swiping up slowly from the bottom edge inside any app. Classic = square, full-width dock like iPhones with a Home button. Dock changes need a respring.</string>
+			<string>Floating dock opens by swiping up slowly from the bottom edge inside any app. Dock Style (Classic = square, full-width dock) is only shown on iPhones with a Home button (6s, 7, 8, SE). Dock changes need a respring.</string>
 			<key>label</key>
 			<string>Dock</string>
 		</dict>

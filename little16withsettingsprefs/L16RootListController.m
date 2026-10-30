@@ -2,6 +2,7 @@
 #import <Preferences/PSSpecifier.h>
 #import <UIKit/UIKit.h>
 #import <spawn.h>
+#import <sys/utsname.h>
 
 #define L16_DOMAIN @"com.michaelmelita1.little16withsettings"
 #define L16_NOTIFY "com.michaelmelita1.little16withsettings/ReloadPrefs"
@@ -20,11 +21,29 @@ static BOOL L16Spawn(const char *path, char *const argv[]) {
     return posix_spawn(&pid, path, NULL, NULL, argv, environ) == 0;
 }
 
+static BOOL L16IsHomeButtonDevice(void) {
+    struct utsname u;
+    uname(&u);
+    NSString *m = [NSString stringWithUTF8String:u.machine];
+    NSArray *ids = @[@"iPhone8,1", @"iPhone8,2", @"iPhone8,4",
+                     @"iPhone9,1", @"iPhone9,2", @"iPhone9,3", @"iPhone9,4",
+                     @"iPhone10,1", @"iPhone10,2", @"iPhone10,4", @"iPhone10,5",
+                     @"iPhone12,8", @"iPhone14,6"];
+    return [ids containsObject:m];
+}
+
 @implementation L16RootListController
 
 - (NSArray *)specifiers {
     if (!_specifiers) {
-        _specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
+        NSMutableArray *specs = [[self loadSpecifiersFromPlistName:@"Root" target:self] mutableCopy];
+        if (!L16IsHomeButtonDevice()) {
+            // Classic (edge to edge) dock is only available on Home button iPhones
+            for (PSSpecifier *spec in [specs copy]) {
+                if ([[spec propertyForKey:@"key"] isEqual:@"dockStyle"]) [specs removeObject:spec];
+            }
+        }
+        _specifiers = specs;
     }
     return _specifiers;
 }

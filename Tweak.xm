@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <notify.h>
+#import <sys/utsname.h>
 
 // ---------------------------------------------------------------------------
 // Preferences
@@ -26,6 +27,24 @@ static NSInteger pDockIcons    = 4; // 4...6
 
 static BOOL L16Bool(NSUserDefaults *d, NSString *key) {
     return [d boolForKey:key];
+}
+
+// Classic (edge to edge) dock is only offered on devices with a Home button:
+// iPhone 6s / 6s Plus / SE (1st) / 7 / 7 Plus / 8 / 8 Plus / SE (2020) / SE (2022)
+static BOOL L16IsHomeButtonDevice(void) {
+    static BOOL result = NO;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        struct utsname u;
+        uname(&u);
+        NSString *m = [NSString stringWithUTF8String:u.machine];
+        NSArray *ids = @[@"iPhone8,1", @"iPhone8,2", @"iPhone8,4",
+                         @"iPhone9,1", @"iPhone9,2", @"iPhone9,3", @"iPhone9,4",
+                         @"iPhone10,1", @"iPhone10,2", @"iPhone10,4", @"iPhone10,5",
+                         @"iPhone12,8", @"iPhone14,6"];
+        result = [ids containsObject:m];
+    });
+    return result;
 }
 
 static void L16LoadPrefs(void) {
@@ -56,7 +75,7 @@ static void L16LoadPrefs(void) {
     pQuickActions  = L16Bool(d, @"quickActions");
     pNotifFix      = L16Bool(d, @"notifFix");
     pRecentsCount  = MAX(1, MIN(5, [d integerForKey:@"recentsCount"]));
-    pDockStyle     = ([d integerForKey:@"dockStyle"] == 1) ? 1 : 0;
+    pDockStyle     = ([d integerForKey:@"dockStyle"] == 1 && L16IsHomeButtonDevice()) ? 1 : 0;
     pDockIcons     = MAX(4, MIN(6, [d integerForKey:@"dockIcons"]));
 }
 
@@ -204,7 +223,34 @@ static void L16Flatten(UIView *v, int depth) {
 }
 %end
 
+// Height of the real iPhone (Home button) dock background.
+#define L16_CLASSIC_DOCK_HEIGHT 96.0
+
+// Distance between the bottom of the floating dock view and the bottom of the
+// screen when the dock is shown. Cached so the hidden state (app switcher)
+// does not overwrite it.
+static CGFloat sL16DockBottomExtra = 0;
+
+// Union (in `root` coordinates) of all visible icon views below `v`.
+static CGRect L16IconsUnion(UIView *v, UIView *root, int depth) {
+    CGRect u = CGRectNull;
+    if (!v || depth > 8 || v.hidden || v.alpha < 0.01) return u;
+    NSString *n = NSStringFromClass([v class]);
+    if ([n containsString:@"IconView"] && ![n containsString:@"ListView"]) {
+        return [v convertRect:v.bounds toView:root];
+    }
+    for (UIView *sub in v.subviews) {
+        CGRect r = L16IconsUnion(sub, root, depth + 1);
+        if (!CGRectIsNull(r)) u = CGRectIsNull(u) ? r : CGRectUnion(u, r);
+    }
+    return u;
+}
+
 %hook SBFloatingDockView
+- (void)setFrame:(CGRect)f { %orig; if (L16ClassicDock()) [self setNeedsLayout]; }
+- (void)setCenter:(CGPoint)c { %orig; if (L16ClassicDock()) [self setNeedsLayout]; }
+- (void)setTransform:(CGAffineTransform)t { %orig; if (L16ClassicDock()) [self setNeedsLayout]; }
+
 - (void)layoutSubviews {
     %orig;
     if (!L16ClassicDock() || !self.window) return;
@@ -221,13 +267,45 @@ static void L16Flatten(UIView *v, int depth) {
     if (!platter) return;
 
     self.clipsToBounds = NO;
-    CGRect screen = [self convertRect:self.window.bounds fromView:self.window];
+
+    UIScreen *scr = self.window.screen ?: [UIScreen mainScreen];
+    CGRect screen = [scr.coordinateSpace convertRect:scr.bounds toCoordinateSpace:self];
+
+    // When the dock is shown its bottom sits a few points above the screen
+    // edge (floating margin). Remember that gap and stick the platter to the
+    // real bottom edge. When the dock is hidden (app switcher) the gap is
+    // negative, so keep the cached value: the platter keeps its fixed height
+    // and slides down with the dock view instead of sticking out.
+    CGFloat extra = CGRectGetMaxY(screen) - CGRectGetMaxY(self.bounds);
+    if (extra >= 0 && extra < 80) sL16DockBottomExtra = extra;
+
     CGRect f = platter.frame;
-    f.origin.x = screen.origin.x;
-    f.size.width = screen.size.width;
-    f.size.height = MAX(f.size.height, CGRectGetMaxY(screen) - f.origin.y); // down to the bottom edge
+    f.size.width  = screen.size.width;
+    f.size.height = L16_CLASSIC_DOCK_HEIGHT;
+    f.origin.x    = screen.origin.x;
+    f.origin.y    = CGRectGetMaxY(self.bounds) + sL16DockBottomExtra - L16_CLASSIC_DOCK_HEIGHT;
     platter.frame = f;
     L16Flatten(platter, 0);
+
+    // Center the icons in the dock (horizontally on the screen, vertically in the platter).
+    CGRect u = L16IconsUnion(self, self, 0);
+    if (CGRectIsNull(u)) return;
+    CGFloat dx = CGRectGetMidX(screen) - CGRectGetMidX(u);
+    CGFloat dy = CGRectGetMidY(f) - CGRectGetMidY(u);
+    if (fabs(dx) < 0.5 && fabs(dy) < 0.5) return;
+
+    NSMutableArray<UIView *> *targets = [NSMutableArray array];
+    for (UIView *sub in self.subviews) {
+        if (sub != platter && !CGRectIsNull(L16IconsUnion(sub, sub, 0))) [targets addObject:sub];
+    }
+    if (targets.count == 0) {
+        for (UIView *sub in platter.subviews) {
+            if (!CGRectIsNull(L16IconsUnion(sub, sub, 0))) [targets addObject:sub];
+        }
+    }
+    for (UIView *sub in targets) {
+        sub.center = CGPointMake(sub.center.x + dx, sub.center.y + dy);
+    }
 }
 %end
 
