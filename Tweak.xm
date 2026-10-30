@@ -173,6 +173,12 @@ static BOOL ViewContainsClass(UIView *view, Class targetClass, int depth) {
 - (void)_setContinuousCornerRadius:(CGFloat)radius;
 @end
 
+@interface SBFloatingDockView : UIView
+@end
+
+@interface SBFloatingDockPlatterView : UIView
+@end
+
 static BOOL L16ClassicDock(void) {
     return L16_ON(pFloatingDock) && pDockStyle == 1;
 }
