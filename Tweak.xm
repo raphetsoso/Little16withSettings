@@ -239,6 +239,7 @@ static void L16Flatten(UIView *v, int depth) {
 #define L16_LIB_MARGIN    20.0   // min margin left / right when the App Library is on
 #define L16_MIN_GAP       10.0   // min gap between two icons (never stuck together)
 #define L16_DIVIDER_EXTRA 12.0   // extra room around the divider (recents / library)
+#define L16_LANDSCAPE_GAP 14.0   // landscape only: compact icons like on iPadOS
 
 // Distance between the bottom of the floating dock view and the bottom of the
 // screen when the dock is shown. Cached so the hidden state (app switcher)
@@ -269,6 +270,8 @@ static UIView *L16EnclosingDock(UIView *v) {
 // by any zoom animation on the parents).
 static void L16MeasureHomePitch(UIView *list) {
     if (!CGAffineTransformIsIdentity(list.transform)) return;
+    // Portrait only: the portrait pitch is the reference for the portrait dock.
+    if (!list.window || list.window.bounds.size.width > list.window.bounds.size.height) return;
     NSMutableArray<UIView *> *icons = [NSMutableArray array];
     CGFloat minY = CGFLOAT_MAX;
     for (UIView *s in list.subviews) {
@@ -398,11 +401,13 @@ static void L16ApplyClassicDockInner(UIView *dock) {
 
     // ---- 2. scale / spacing ------------------------------------------------
     CGFloat W          = screen.size.width;
+    BOOL landscape     = W > screen.size.height;
     CGFloat P          = L16HomePitch(W);
     CGFloat naturalGap = MAX(0.0, P - L16_ICON_SIZE);
     // Side margin of the home screen icons (27pt on a 375pt screen).
-    CGFloat homeMargin = MAX(12.0, (W - (3.0 * P + L16_ICON_SIZE)) / 2.0);
-    CGFloat margin     = hasLibrary ? MIN(homeMargin, L16_LIB_MARGIN) : homeMargin;
+    CGFloat homeMargin = landscape ? L16_LIB_MARGIN
+                                   : MAX(12.0, (W - (3.0 * P + L16_ICON_SIZE)) / 2.0);
+    CGFloat margin     = (hasLibrary || landscape) ? MIN(homeMargin, L16_LIB_MARGIN) : homeMargin;
     CGFloat avail      = W - 2.0 * margin;
     CGFloat nF         = (CGFloat)nAll;
     CGFloat dividerExtra = (nLeft > 0 && right.count > 0) ? L16_DIVIDER_EXTRA : 0;
@@ -412,10 +417,12 @@ static void L16ApplyClassicDockInner(UIView *dock) {
     CGFloat baseExtra = (nLeft > 0 && nRecents > 0) ? L16_DIVIDER_EXTRA : 0;
     CGFloat naturalW  = ((CGFloat)nBase - 1.0) * P + L16_ICON_SIZE + baseExtra;
     CGFloat s = MIN(1.0, (W - 2.0 * homeMargin) / naturalW);
+    // Landscape: plenty of room, icons keep their full size.
+    if (landscape) s = 1.0;
 
-    // With the app library the icons keep their size as long as they can keep
-    // a minimum gap between them; only then they shrink (all the same size).
-    if (hasLibrary && nAll > 1) {
+    // With the app library (or in landscape) the icons keep their size as long
+    // as they can keep a minimum gap between them; only then they shrink.
+    if ((hasLibrary || landscape) && nAll > 1) {
         CGFloat need = nF * L16_ICON_SIZE + (nF - 1.0) * L16_MIN_GAP + dividerExtra;
         if (need * s > avail) s = avail / need;
     }
@@ -423,7 +430,8 @@ static void L16ApplyClassicDockInner(UIView *dock) {
 
     CGFloat iconW     = L16_ICON_SIZE * s;
     CGFloat dividerPx = dividerExtra * s;
-    CGFloat gapPx     = naturalGap * s;
+    // Portrait: same spacing as the home screen. Landscape: compact, like iPadOS.
+    CGFloat gapPx     = (landscape ? L16_LANDSCAPE_GAP : naturalGap) * s;
     if (nAll > 1) {
         CGFloat maxGap = (avail - nF * iconW - dividerPx) / (nF - 1.0);
         if (gapPx > maxGap) gapPx = maxGap; // tighten the spacing, never the icons
