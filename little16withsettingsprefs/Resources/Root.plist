@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Master switch. When off, every feature below is disabled and iOS behaves as stock.</string>
+			<key>label</key>
+			<string>General</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>enabled</string>
+			<key>label</key>
+			<string>Enable Little16</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Home gesture = swipe up from the bottom edge, like iPhone X. Control Center opens from the top of the screen.</string>
+			<key>label</key>
+			<string>Gestures</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>homeGesture</string>
+			<key>label</key>
+			<string>iPhone X Home Gesture</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>controlCenterTop</string>
+			<key>label</key>
+			<string>Control Center from Top Edge</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>hideHomeBar</string>
+			<key>label</key>
+			<string>Hide Home Bar</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Floating dock opens by swiping up slowly from the bottom edge inside any app. Classic = square, full-width dock like iPhones with a Home button. Dock changes need a respring.</string>
+			<key>label</key>
+			<string>Dock</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>floatingDock</string>
+			<key>label</key>
+			<string>Floating Dock</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>0</integer>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>dockStyle</string>
+			<key>label</key>
+			<string>Dock Style</string>
+			<key>validTitles</key>
+			<array>
+				<string>Floating (rounded)</string>
+				<string>Classic (edge to edge)</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>0</integer>
+				<integer>1</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>dockRecents</string>
+			<key>label</key>
+			<string>Recent Apps in Dock</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>3</integer>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>recentsCount</string>
+			<key>label</key>
+			<string>Number of Recent Apps</string>
+			<key>validTitles</key>
+			<array>
+				<string>1</string>
+				<string>2</string>
+				<string>3</string>
+				<string>4</string>
+				<string>5</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>1</integer>
+				<integer>2</integer>
+				<integer>3</integer>
+				<integer>4</integer>
+				<integer>5</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>appLibrary</string>
+			<key>label</key>
+			<string>App Library in Dock</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>4</integer>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>dockIcons</string>
+			<key>label</key>
+			<string>Dock Icons</string>
+			<key>validTitles</key>
+			<array>
+				<string>4</string>
+				<string>5</string>
+				<string>6</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>4</integer>
+				<integer>5</integer>
+				<integer>6</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Status Bar</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>ipadStatusBar</string>
+			<key>label</key>
+			<string>iPad Status Bar</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>Lock Screen</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>quickActions</string>
+			<key>label</key>
+			<string>Quick Actions (Flashlight &amp; Camera)</string>
+		</dict>
+		<dict>
+			<key>PostNotification</key>
+			<string>com.michaelmelita1.little16withsettings/ReloadPrefs</string>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.michaelmelita1.little16withsettings</string>
+			<key>key</key>
+			<string>notifFix</string>
+			<key>label</key>
+			<string>Fix Notification Position</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>footerText</key>
+			<string>Some changes (dock, status bar, gestures) only fully apply after a respring.</string>
+			<key>label</key>
+			<string>Apply</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>respring</string>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Respring</string>
+		</dict>
+		<dict>
+			<key>action</key>
+			<string>resetSettings</string>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Reset Settings</string>
+		</dict>
+	</array>
+	<key>title</key>
+	<string>Little16 With Settings</string>
+</dict>
+</plist>

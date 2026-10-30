@@ -1,0 +1,12 @@
+Package: com.michaelmelita1.little16withsettings
+Name: Little16 With Settings
+Author: michaelmelita1
+Description: Little16 (iPhone X gestures, floating dock, iPad status bar, lockscreen quick actions) with a Settings pane to toggle each feature
+Depends: mobilesubstrate, preferenceloader
+Conflicts: com.michaelmelita1.little16
+Replaces: com.michaelmelita1.little16
+Maintainer: michelmelita1
+Architecture: iphoneos-arm64
+Section: Tweaks
+Version: 0.2.0
+Sileodepiction: https://michaelmelita1.github.io/sileodepictions/com.michaelmelita1.little16/info.json
